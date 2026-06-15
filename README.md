@@ -1,77 +1,103 @@
 # Novel Downloader (弦-书籍下载器 Web版)
 
-开源的小说下载Web应用。基于 Node.js + Express + React + TypeScript 构建。
+开源的小说下载 Web 应用。基于 **Cloudflare Workers** + **Hono** + **D1 Database** + **R2 Storage** 构建。
 
 ## 功能特性
 
 - 多书源支持（可扩展）
 - 小说搜索
-- 章节浏览
+- 章节浏览（带缓存）
+- **异步下载任务**（整书下载不超时）
 - TXT 格式导出
-- EPUB 格式导出
-- 下载进度追踪
-- RESTful API
+- R2 预签名链接下载
+- D1 数据库缓存（小说/章节）
+
+## 架构
+
+```
+Cloudflare Workers (Hono)
+├── D1 Database (任务状态、缓存)
+├── R2 Storage (下载文件)
+└── Static Assets (前端)
+```
 
 ## 快速开始
 
-### 安装依赖
+### 前置要求
+
+- Node.js >= 18
+- Cloudflare 账号
+- Wrangler CLI (`npm i -g wrangler`)
+
+### 1. 初始化 D1 数据库
 
 ```bash
+cd worker
 npm install
+npx wrangler d1 create novel-db  # 创建 D1 数据库，复制 database_id
+# 编辑 wrangler.toml 中的 database_id
+npx wrangler d1 execute novel-db --local --file=./schema.sql  # 初始化本地 schema
 ```
 
-或手动安装各子包：
+### 2. 初始化 R2 存储桶
 
-```bash
-cd server && npm install && cd ..
-cd web && npm install && cd ..
+在 Cloudflare Dashboard 创建 R2 存储桶 `novel-downloads`，并在 `wrangler.toml` 中配置。
+
+### 3. 配置 wrangler.toml
+
+```toml
+[[d1_databases]]
+binding = "DB"
+database_name = "novel-db"
+database_id = "你的_D1_DATABASE_ID"  # 替换为实际 ID
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "novel-downloads"
 ```
 
-### 构建前端
+### 4. 本地开发
 
 ```bash
-cd web && npm run build
+cd worker
+npm install
+npx wrangler dev
 ```
 
-### 启动服务器
+访问 `http://localhost:8787`
+
+### 5. 部署
 
 ```bash
-cd server && npm run build && npm start
-```
-
-访问 `http://localhost:3000` 即可使用。
-
-### 开发模式
-
-同时启动后端和前端（前端端口5173，后端端口3000）：
-
-```bash
-# 终端1 - 后端
-cd server && npm run dev
-
-# 终端2 - 前端
-cd web && npm run dev
+cd worker
+npx wrangler deploy
 ```
 
 ## API 文档
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
+| GET | `/api/health` | 健康检查 |
 | GET | `/api/sources` | 获取可用书源列表 |
 | POST | `/api/search` | 搜索小说 `{ source, keyword }` |
 | POST | `/api/novel` | 获取小说信息和章节列表 `{ source, novelId }` |
 | POST | `/api/chapter` | 获取章节内容 `{ source, novelId, chapterId }` |
-| POST | `/api/download` | 下载整本小说 `{ source, novelId, format }` |
+| POST | `/api/download` | **创建异步下载任务** `{ source, novelId, format }` |
+| GET | `/api/task/:taskId` | 查询任务状态 |
+| GET | `/api/download/:taskId` | 下载已完成的任务文件 |
+| GET | `/api/tasks` | 列出最近的任务 |
 
 ## 扩展书源
 
-在 `server/src/sources/` 目录下新建书源类，继承 `BaseSource` 并实现接口方法即可。
+在 `src/sources/` 目录下新建书源类，继承 `BaseSource` 并实现接口方法即可。
 
 ## 技术栈
 
-- **后端**: Node.js + Express + TypeScript + Cheerio
+- **运行时**: Cloudflare Workers
+- **框架**: Hono + TypeScript
+- **数据库**: Cloudflare D1 (SQLite)
+- **存储**: Cloudflare R2
 - **前端**: React + Vite + TypeScript
-- **导出**: TXT / EPUB
 
 ## 免责声明
 

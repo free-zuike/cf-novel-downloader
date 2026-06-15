@@ -1,6 +1,6 @@
-import type { SourceMeta, SearchResult, NovelInfo, Chapter, ChapterContent } from './types';
+import type { SourceMeta, SearchResult, NovelInfo, Chapter, ChapterContent, TaskStatus } from './types';
 
-const API_BASE = (import.meta as any).env?.VITE_API_BASE || '';
+const API_BASE = '';
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -27,8 +27,8 @@ export async function search(source: string, keyword: string): Promise<SearchRes
   return data.results;
 }
 
-export async function getNovel(source: string, novelId: string): Promise<{ info: NovelInfo; chapters: Chapter[] }> {
-  return request<{ info: NovelInfo; chapters: Chapter[] }>('/api/novel', {
+export async function getNovel(source: string, novelId: string): Promise<{ info: NovelInfo; chapters: Chapter[]; cached?: boolean }> {
+  return request<{ info: NovelInfo; chapters: Chapter[]; cached?: boolean }>('/api/novel', {
     method: 'POST',
     body: JSON.stringify({ source, novelId }),
   });
@@ -42,7 +42,32 @@ export async function getChapter(source: string, novelId: string, chapterId: str
   return data.chapter;
 }
 
-export async function downloadNovel(source: string, novelId: string, format: 'txt' | 'epub', title: string): Promise<void> {
+// Create async download task
+export async function createDownloadTask(source: string, novelId: string, format: 'txt' | 'epub'): Promise<{ taskId: string; status: string; title: string; total: number }> {
+  return request<{ taskId: string; status: string; title: string; total: number }>('/api/download', {
+    method: 'POST',
+    body: JSON.stringify({ source, novelId, format }),
+  });
+}
+
+// Poll task status
+export async function getTaskStatus(taskId: string): Promise<{ task: TaskStatus }> {
+  return request<{ task: TaskStatus }>(`/api/task/${taskId}`);
+}
+
+// Get download URL for completed task
+export async function getDownloadUrl(taskId: string): Promise<string | null> {
+  const res = await fetch(`/api/download/${taskId}`);
+  if (res.ok) {
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    return url;
+  }
+  return null;
+}
+
+// Legacy direct download (for small files)
+export async function downloadDirect(source: string, novelId: string, format: 'txt' | 'epub', title: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/download`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

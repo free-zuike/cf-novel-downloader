@@ -20,8 +20,4 @@ export function listSources(): SourceMeta[] {
   return Object.values(sources).map((s) => s.getMeta());
 }
 
-export function registerSource(id: string, source: BaseSource) {
-  sources[id] = source;
-}
-
 export { BaseSource, BiqugeSource, Biquge5200Source };

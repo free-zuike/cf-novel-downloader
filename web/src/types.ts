@@ -48,3 +48,15 @@ export interface DownloadProgress {
   message?: string;
   format: string;
 }
+
+export interface TaskStatus {
+  id: string;
+  status: 'pending' | 'downloading' | 'completed' | 'error';
+  current: number;
+  total: number;
+  fileKey: string | null;
+  downloadUrl: string | null;
+  error: string | null;
+  createdAt: number;
+  completedAt: number | null;
+}

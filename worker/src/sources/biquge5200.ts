@@ -13,25 +13,26 @@ export class Biquge5200Source extends BaseSource {
     const $ = this.loadHtml(html);
 
     const results: SearchResult[] = [];
+    const links = $.findAll('a');
 
-    $('.listbox li, .booklist .item, .search-result a').each((_, el) => {
-      const $el = $(el);
-      const $link = $el.find('a').first();
-      const title = $link.text().trim();
-      const href = $link.attr('href') || '';
+    for (const link of links) {
+      const href = (link as any).value || '';
+      const title = link.text?.trim() || '';
 
-      if (title && href) {
-        const idMatch = href.match(/\/(\d+)\/?/);
-        results.push({
-          id: idMatch ? idMatch[1] : href,
-          title,
-          author: $el.find('.author, p').last().text().replace(/作.*者[:：]/, '').trim() || '未知',
-          cover: $el.find('img').attr('src') || undefined,
-          category: '',
-          lastChapter: '',
-        });
+      if (title && title.length < 50 && href.match(/\/\d+\/?$/) && results.length < 20) {
+        const idMatch = href.match(/\/(\d+)/);
+        const id = idMatch ? idMatch[1] : '';
+
+        if (id && !results.some(r => r.id === id)) {
+          results.push({
+            id,
+            title,
+            author: '未知',
+            lastChapter: '',
+          });
+        }
       }
-    });
+    }
 
     return results;
   }
@@ -41,25 +42,26 @@ export class Biquge5200Source extends BaseSource {
     const html = await this.fetchHtml(url);
     const $ = this.loadHtml(html);
 
-    const title = $('h1').first().text().trim() || novelId;
-    const author = $('#info p').first().text().replace(/作.*者[:：]/, '').trim() || '未知';
-    const cover = $('#fmimg img').attr('src') || '';
-    const description = $('#intro').text().trim();
+    const title = $.getText('h1') || novelId;
+    const info = $.getText('#info p') || '';
+    const author = info.replace(/作.*者[:：]/, '').trim() || '未知';
 
+    const description = $.getText('#intro') || '';
+
+    const links = $.findAll('a');
     const chapters: Chapter[] = [];
     const seen = new Set<string>();
 
-    $('#list dd a, .chapter-list a').each((i, el) => {
-      const $el = $(el);
-      const href = $el.attr('href') || '';
-      const text = $el.text().trim();
+    for (const link of links) {
+      const href = (link as any).value || '';
+      const text = link.text?.trim() || '';
 
-      if (!text || !href || !href.includes('.html')) return;
+      if (!text || !href || !href.includes('.html')) continue;
 
       const idMatch = href.match(/(\d+)\.html/);
       const chapterId = idMatch ? idMatch[1] : href;
 
-      if (seen.has(chapterId)) return;
+      if (seen.has(chapterId)) continue;
       seen.add(chapterId);
 
       chapters.push({
@@ -67,18 +69,15 @@ export class Biquge5200Source extends BaseSource {
         title: text,
         index: chapters.length,
       });
-    });
+    }
 
     return {
       info: {
         id: novelId,
         title,
         author,
-        cover,
-        description: this.sanitize(description),
-        status: '',
+        description,
         lastChapter: chapters[chapters.length - 1]?.title || '',
-        updateTime: '',
         chapterCount: chapters.length,
       },
       chapters,
@@ -90,11 +89,18 @@ export class Biquge5200Source extends BaseSource {
     const html = await this.fetchHtml(url);
     const $ = this.loadHtml(html);
 
-    const title = $('h1, .bookname h1').first().text().trim() || chapterId;
+    const title = $.getText('h1') || chapterId;
+    const contentEl = $.querySelector('#content, #chaptercontent');
+    const rawContent = contentEl ? (contentEl as any).text || '' : $.text();
 
-    $('#content, #chaptercontent').find('script, style, ins, a').remove();
-    const rawContent = $('#content, #chaptercontent').html() || '';
-    const content = this.sanitize(rawContent);
+    const content = rawContent
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/\r\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
 
     return {
       id: chapterId,

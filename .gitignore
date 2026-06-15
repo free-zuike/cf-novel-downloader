@@ -13,3 +13,7 @@ coverage/
 output/
 downloads/
 temp/
+worker/node_modules/
+worker/dist/
+*.wrangler/
+

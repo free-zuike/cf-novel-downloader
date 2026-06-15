@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { listSources, search, getNovel, getChapter, downloadNovel } from './api';
-import type { SourceMeta, SearchResult, NovelInfo, Chapter, ChapterContent } from './types';
+import { listSources, search, getNovel, getChapter, createDownloadTask, getTaskStatus, getDownloadUrl } from './api';
+import type { SourceMeta, SearchResult, NovelInfo, Chapter, ChapterContent, TaskStatus } from './types';
 
 type View = 'search' | 'detail' | 'chapter';
 
@@ -22,9 +22,10 @@ export default function App() {
   const [loadingChapter, setLoadingChapter] = useState(false);
   const [chapterError, setChapterError] = useState('');
 
-  const [downloading, setDownloading] = useState(false);
   const [downloadFormat, setDownloadFormat] = useState<'txt' | 'epub'>('txt');
   const [downloadError, setDownloadError] = useState('');
+  const [downloadInfo, setDownloadInfo] = useState<{ taskId: string; status: TaskStatus } | null>(null);
+  const [downloadLinks, setDownloadLinks] = useState<Record<string, string>>({});
 
   useEffect(() => {
     listSources().then((s) => {
@@ -34,6 +35,31 @@ export default function App() {
       }
     });
   }, []);
+
+  // Poll task status when download is in progress
+  useEffect(() => {
+    if (!downloadInfo || downloadInfo.status.status === 'completed' || downloadInfo.status.status === 'error') {
+      return;
+    }
+
+    const interval = setInterval(async () => {
+      try {
+        const { task } = await getTaskStatus(downloadInfo.taskId);
+        setDownloadInfo({ taskId: downloadInfo.taskId, status: task });
+
+        if (task.status === 'completed' && task.downloadUrl) {
+          clearInterval(interval);
+          setDownloadLinks((prev) => ({ ...prev, [downloadInfo.taskId]: task.downloadUrl! }));
+        } else if (task.status === 'error') {
+          clearInterval(interval);
+        }
+      } catch (err) {
+        console.error('Poll error:', err);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [downloadInfo]);
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -89,14 +115,41 @@ export default function App() {
 
   const handleDownload = async () => {
     if (!novelInfo) return;
-    setDownloading(true);
     setDownloadError('');
     try {
-      await downloadNovel(selectedSource, novelInfo.id, downloadFormat, novelInfo.title);
+      const result = await createDownloadTask(selectedSource, novelInfo.id, downloadFormat);
+      setDownloadInfo({
+        taskId: result.taskId,
+        status: {
+          id: result.taskId,
+          status: 'pending',
+          current: 0,
+          total: result.total,
+          fileKey: null,
+          downloadUrl: null,
+          error: null,
+          createdAt: Date.now(),
+          completedAt: null,
+        },
+      });
     } catch (err) {
       setDownloadError((err as Error).message);
-    } finally {
-      setDownloading(false);
+    }
+  };
+
+  const handleDownloadClick = async (taskId: string, title: string, format: string) => {
+    try {
+      const url = await getDownloadUrl(taskId);
+      if (url) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${title}.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+    } catch (err) {
+      setDownloadError((err as Error).message);
     }
   };
 
@@ -104,6 +157,7 @@ export default function App() {
     setView('search');
     setNovelInfo(null);
     setChapters([]);
+    setDownloadInfo(null);
   };
 
   const backToDetail = () => {
@@ -111,11 +165,16 @@ export default function App() {
     setCurrentChapter(null);
   };
 
+  const progress = downloadInfo ? Math.round((downloadInfo.status.current / Math.max(downloadInfo.status.total, 1)) * 100) : 0;
+  const isDownloading = downloadInfo && ['pending', 'downloading'].includes(downloadInfo.status.status);
+  const isCompleted = downloadInfo && downloadInfo.status.status === 'completed';
+  const isError = downloadInfo && downloadInfo.status.status === 'error';
+
   return (
     <div className="app">
       <header className="header">
         <h1>📚 小说下载器</h1>
-        <p>开源小说搜索与下载工具 · Novel Downloader</p>
+        <p>开源小说搜索与下载工具 · Cloudflare Workers</p>
       </header>
 
       <main className="container">
@@ -220,15 +279,57 @@ export default function App() {
                   <button
                     className="btn btn-primary"
                     onClick={handleDownload}
-                    disabled={downloading || chapters.length === 0}
+                    disabled={isDownloading || chapters.length === 0}
                   >
-                    {downloading ? '下载中...' : `⬇️ 下载整本 (${chapters.length}章)`}
+                    {isDownloading ? '处理中...' : `⬇️ 创建下载任务`}
                   </button>
+                  {isCompleted && downloadInfo && (
+                    <button
+                      className="btn btn-outline"
+                      onClick={() => handleDownloadClick(downloadInfo.taskId, novelInfo.title, downloadFormat)}
+                    >
+                      ⬇️ 下载文件
+                    </button>
+                  )}
+                  {isError && (
+                    <span style={{ color: 'var(--danger)', fontSize: 13 }}>下载失败</span>
+                  )}
                   <span style={{ color: 'var(--text-muted)', fontSize: 13, marginLeft: 'auto' }}>
-                    提示：下载整本可能需要较长时间
+                    {chapters.length > 0 ? `${chapters.length}章节` : ''}
                   </span>
                 </div>
+
+                {downloadInfo && (
+                  <div style={{ padding: '12px 24px', borderBottom: '1px solid var(--border)', background: '#f9fafb' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                      <span style={{ fontWeight: 500 }}>
+                        {downloadInfo.status.status === 'pending' && '⏳ 等待中'}
+                        {downloadInfo.status.status === 'downloading' && '📥 下载中'}
+                        {downloadInfo.status.status === 'completed' && '✅ 完成'}
+                        {downloadInfo.status.status === 'error' && '❌ 失败'}
+                      </span>
+                      <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                        {downloadInfo.status.current} / {downloadInfo.status.total} 章节
+                      </span>
+                    </div>
+                    <div className="progress-bar">
+                      <div className="progress-fill" style={{ width: `${progress}%` }}></div>
+                    </div>
+                    {isCompleted && downloadInfo && (
+                      <p style={{ margin: '8px 0 0', fontSize: 13, color: 'var(--success)' }}>
+                        点击上方「下载文件」按钮获取文件
+                      </p>
+                    )}
+                    {isError && downloadInfo.status.error && (
+                      <p style={{ margin: '8px 0 0', fontSize: 13, color: 'var(--danger)' }}>
+                        错误：{downloadInfo.status.error}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {downloadError && <div style={{ padding: '0 24px' }}><div className="error">{downloadError}</div></div>}
+
                 <div className="chapter-list">
                   <h3 className="section-title" style={{ marginBottom: 16 }}>章节列表</h3>
                   <div className="chapter-grid">
@@ -267,7 +368,7 @@ export default function App() {
       </main>
 
       <footer className="footer">
-        Novel Downloader · 开源项目 · 仅供学习交流 · 请支持正版
+        Novel Downloader · Cloudflare Workers · D1 Database · R2 Storage · 开源项目
       </footer>
     </div>
   );
