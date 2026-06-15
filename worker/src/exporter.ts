@@ -1,4 +1,4 @@
-import type { ChapterData } from '../types';
+import type { ChapterContent } from './types';
 
 export interface BookData {
   id: string;
@@ -6,7 +6,7 @@ export interface BookData {
   author: string;
   description?: string;
   cover?: string;
-  chapters: ChapterData[];
+  chapters: ChapterContent[];
 }
 
 export function exportToTxt(book: BookData): string {

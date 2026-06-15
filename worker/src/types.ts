@@ -1,7 +1,7 @@
 export interface Env {
-  DB: D1Database;
-  FILES: R2Bucket;
-  AI: Ai;
+  DB: any;
+  FILES: any;
+  [key: string]: any;
 }
 
 export interface Task {
@@ -10,7 +10,7 @@ export interface Task {
   novel_title: string;
   source: string;
   format: 'txt' | 'epub';
-  status: 'pending' | 'downloading' | 'completed' | 'error';
+  status: 'pending' | 'processing' | 'downloading' | 'completed' | 'error';
   current: number;
   total: number;
   file_key: string | null;
@@ -76,7 +76,7 @@ export interface ChapterContent {
 
 export interface TaskStatus {
   id: string;
-  status: 'pending' | 'downloading' | 'completed' | 'error';
+  status: 'pending' | 'processing' | 'downloading' | 'completed' | 'error';
   current: number;
   total: number;
   fileKey: string | null;
